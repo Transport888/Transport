@@ -1,0 +1,158 @@
+
+
+install.packages(dplyr)
+install.packages(quantreg)
+library(dplyr)
+library(quantreg)
+
+
+Accessibility_ <- Accessibility_ %>%
+  mutate(across(Municipalities, ~ as.character(gsub(",", ".", .))))
+
+
+summary(Accessibility_)
+
+
+Accessibility_$REG <- as.numeric(Accessibility_$REG)
+
+vari <- c("INC","EDU","WAS","URB","TEC","RAI","HIG","AIR","POR")
+
+datatable <- Accessibility_[, vari]
+
+cor_matrix <- cor(datatable, use = "complete.obs")
+round(cor_matrix, 3)
+
+install.packages("ggplot2") 
+library(ggplot2)
+install.packages("scales") 
+library(scales)
+
+quartz(width=10, height=6)  
+
+ggplot(Accessibility_, aes(x = INC)) +
+  geom_histogram(aes(y = ..density..), fill = "blue", color = "black", bins = 30) +
+  geom_density(color = "red", size = 1.2, adjust = 2) +  
+  scale_x_continuous(
+    breaks = pretty_breaks(n = 10),
+    labels = label_number(accuracy = 1, big.mark = ",") 
+  ) +
+  scale_y_continuous(
+    labels = label_scientific(accuracy = 0.01)  
+  ) +
+  labs(title = "", x = "INC", y = "Density") +
+  theme_minimal()
+
+
+
+norm_minmax <- function(x) {
+  (x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE))
+}
+
+norm_minmax_inv <- function(x) {
+  1 - norm_minmax(x)
+}
+
+var_Positive <- c("EDU", "WAS", "URB", "TEC")
+var_negative <- c("RAI", "HIG", "AIR", "POR")
+
+
+Accessibility_ <- Accessibility_ %>%
+  mutate(
+    across(all_of(var_Positive), ~ . / 100),                
+    across(all_of(var_negative), norm_minmax_inv),          
+    INC = norm_minmax(INC)                           
+  )
+
+
+Accessibility_$REG <- as.factor(Accessibility_$REG)
+ 
+
+OLS <- lm(
+  INC ~ EDU + WAS + URB + TEC +
+    RAI + HIG + AIR + POR,
+  data = Accessibility_
+)
+
+summary(OLS)
+
+install.packages("car")
+library(car)
+
+vif(OLS)
+
+
+
+#  Breusch-Pagan
+install.packages("lmtest")  
+library(lmtest)
+
+bptest(OLS)
+
+
+
+
+#(Abdullah, 2016)
+taus <- c(0.1, 0.25, 0.5, 0.75, 0.9)
+
+# 
+QR <- rq(
+  INC ~ EDU + WAS + URB + TEC +
+    RAI + HIG + AIR + POR + REG + POP,
+  tau = taus,
+  data = Accessibility_
+)
+
+sumQR <- summary(QR)
+sumQR
+
+
+# (n.d. ,2023)
+
+pseudo_R2 <- sapply(taus, function(tau) {
+
+  fit0 <- rq(INC ~ 1, tau = tau, data = Accessibility_)
+  
+
+  fit1 <- rq(INC ~ EDU + WAS + URB + TEC +
+               RAI + HIG + AIR + POR + REG + POP,
+             tau = tau, data = Accessibility_)
+  
+
+  1 - fit1$rho / fit0$rho
+})
+
+names(pseudo_R2) <- paste0("tau_", taus)
+
+
+sumQR         
+pseudo_R2     
+
+library(quantreg)
+set.seed(123)
+
+taus <- c(0.1, 0.25, 0.5, 0.75, 0.9)
+results <- list()
+
+for(t in taus){
+  QR <- rq(INC ~ EDU + WAS + URB + TEC + RAI + HIG + AIR + POR + REG + POP, tau = t, data = Accessibility_)
+  sum_QR <- summary(QR, se = "boot", R = 1000) 
+  coef_table <- data.frame(
+    Variable = rownames(sum_QR$coefficients),
+    Estimate = sum_QR$coefficients[, "Value"],
+    Std.Error = sum_QR$coefficients[, "Std. Error"],
+    t.value = sum_QR$coefficients[, "t value"],
+    p.value = sum_QR$coefficients[, "Pr(>|t|)"],
+    Tau = t
+  )
+  results[[as.character(t)]] <- coef_table
+}
+
+QR_table
+
+
+#List of reference
+#Abdullah, i. 2016. Tutorial: Quantile Regression using R. Rpubs. https://rpubs.com/ibn_abdullah/rquantile
+# n.d. 2023.find pseudo R-squared for quantile regression models. https://stackoverflow.com/questions/76428807/find-pseudo-r-squared-for-quantile-regression-models
+
+
+
